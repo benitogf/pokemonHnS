@@ -1,11 +1,15 @@
 #include "global.h"
+#include "data.h"
+#include "decompress.h"
 #include "graphics.h"
 #include "mail.h"
 #include "palette.h"
 #include "pokemon_icon.h"
 #include "sprite.h"
+#include "constants/species.h"
 
 #define POKE_ICON_BASE_PAL_TAG 56000
+#define POKE_ICON_SHINY_PAL_TAG_BASE 57000
 
 #define INVALID_ICON_SPECIES SPECIES_OLD_UNOWN_J // Oddly specific, used when an icon should be a ?. Any of the 'old unown' would work
 
@@ -1019,9 +1023,6 @@ const struct SpritePalette gMonIconPaletteTable[] =
     { gMonIconPalettes[0], POKE_ICON_BASE_PAL_TAG + 0 },
     { gMonIconPalettes[1], POKE_ICON_BASE_PAL_TAG + 1 },
     { gMonIconPalettes[2], POKE_ICON_BASE_PAL_TAG + 2 },
-    { gMonIconPalettes[3], POKE_ICON_BASE_PAL_TAG + 3 },
-    { gMonIconPalettes[4], POKE_ICON_BASE_PAL_TAG + 4 },
-    { gMonIconPalettes[5], POKE_ICON_BASE_PAL_TAG + 5 },
 };
 
 static const struct OamData sMonIconOamData =
@@ -1130,21 +1131,33 @@ static const u16 sSpriteImageSizes[3][4] =
 u8 CreateMonIcon(u16 species, void (*callback)(struct Sprite *), s16 x, s16 y, u8 subpriority, u32 personality, bool32 handleDeoxys, bool32 isShiny)
 {
     u8 spriteId;
-    u8 palOffset = isShiny ? 3 : 0;
-    struct MonIconSpriteTemplate iconTemplate =
+    u16 paletteTag;
+
+    if (isShiny && species <= NUM_SPECIES && species != SPECIES_NONE)
     {
-        .oam = &sMonIconOamData,
-        .image = GetMonIconPtr(species, personality, handleDeoxys),
-        .anims = sMonIconAnims,
-        .affineAnims = sMonIconAffineAnims,
-        .callback = callback,
-        .paletteTag = POKE_ICON_BASE_PAL_TAG + gMonIconPaletteIndices[species] + palOffset,
-    };
+        LoadShinyMonIconPalette(species);
+        paletteTag = GetShinyMonIconPaletteTag(species);
+    }
+    else
+    {
+        paletteTag = POKE_ICON_BASE_PAL_TAG + gMonIconPaletteIndices[species];
+        if (species > NUM_SPECIES)
+            paletteTag = POKE_ICON_BASE_PAL_TAG;
+    }
 
-    if (species > NUM_SPECIES)
-        iconTemplate.paletteTag = POKE_ICON_BASE_PAL_TAG + palOffset;
+    {
+        struct MonIconSpriteTemplate iconTemplate =
+        {
+            .oam = &sMonIconOamData,
+            .image = GetMonIconPtr(species, personality, handleDeoxys),
+            .anims = sMonIconAnims,
+            .affineAnims = sMonIconAffineAnims,
+            .callback = callback,
+            .paletteTag = paletteTag,
+        };
 
-    spriteId = CreateMonIconSprite(&iconTemplate, x, y, subpriority);
+        spriteId = CreateMonIconSprite(&iconTemplate, x, y, subpriority);
+    }
 
     UpdateMonIconFrame(&gSprites[spriteId]);
 
@@ -1257,6 +1270,120 @@ void LoadMonIconPalette(u16 species)
     u8 palIndex = gMonIconPaletteIndices[species];
     if (IndexOfSpritePaletteTag(gMonIconPaletteTable[palIndex].tag) == 0xFF)
         LoadSpritePalette(&gMonIconPaletteTable[palIndex]);
+}
+
+static bool32 SpeciesHasModernShiny(u16 species)
+{
+    switch (species)
+    {
+    case SPECIES_PIKACHU:
+    case SPECIES_RAICHU:
+    case SPECIES_PICHU:
+    case SPECIES_VAPOREON:
+    case SPECIES_JOLTEON:
+    case SPECIES_FLAREON:
+    case SPECIES_REGICE:
+    case SPECIES_HERACROSS:
+    case SPECIES_HAUNTER:
+    case SPECIES_GENGAR:
+    case SPECIES_SCYTHER:
+    case SPECIES_BLAZIKEN:
+    case SPECIES_XATU:
+    case SPECIES_PARAS:
+    case SPECIES_CHINCHOU:
+    case SPECIES_LANTURN:
+    case SPECIES_ZAPDOS:
+    case SPECIES_ELEKID:
+    case SPECIES_FARFETCHD:
+    case SPECIES_MAROWAK:
+    case SPECIES_PHANPY:
+    case SPECIES_LAPRAS:
+    case SPECIES_TENTACOOL:
+    case SPECIES_TENTACRUEL:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static u32 GbaColorDistance(u16 c1, u16 c2)
+{
+    s32 r1 = c1 & 0x1F, g1 = (c1 >> 5) & 0x1F, b1 = (c1 >> 10) & 0x1F;
+    s32 r2 = c2 & 0x1F, g2 = (c2 >> 5) & 0x1F, b2 = (c2 >> 10) & 0x1F;
+    s32 dr = r1 - r2, dg = g1 - g2, db = b1 - b2;
+    return (u32)(dr * dr + dg * dg + db * db);
+}
+
+u16 GetShinyMonIconPaletteTag(u16 species)
+{
+    return POKE_ICON_SHINY_PAL_TAG_BASE + species;
+}
+
+void LoadShinyMonIconPalette(u16 species)
+{
+    u16 tag = POKE_ICON_SHINY_PAL_TAG_BASE + species;
+    u8 palIndex;
+    const u16 *iconPal;
+    const struct CompressedSpritePalette *shinyPalSrc;
+    u16 normalBuf[16];
+    u16 shinyBuf[16];
+    u16 resultBuf[16];
+    u32 i, j;
+    struct SpritePalette pal;
+
+    // Already loaded
+    if (IndexOfSpritePaletteTag(tag) != 0xFF)
+        return;
+
+    if (species > NUM_SPECIES)
+        species = INVALID_ICON_SPECIES;
+
+    palIndex = gMonIconPaletteIndices[species];
+    iconPal = gMonIconPalettes[palIndex];
+
+    // Decompress the species' normal and shiny sprite palettes
+    LZDecompressWram(gMonPaletteTable[species].data, normalBuf);
+
+    if (SpeciesHasModernShiny(species) && gSaveBlock1Ptr->tx_Features_ShinyColors == 1)
+        shinyPalSrc = &gMonShinyPaletteTable_Modern[species];
+    else
+        shinyPalSrc = &gMonShinyPaletteTable[species];
+
+    LZDecompressWram(shinyPalSrc->data, shinyBuf);
+
+    // For each icon palette color, find the nearest match in the normal
+    // sprite palette and replace with the corresponding shiny color
+    for (i = 0; i < 16; i++)
+    {
+        if (i == 0)
+        {
+            // Keep transparency color unchanged
+            resultBuf[i] = iconPal[0];
+            continue;
+        }
+
+        u32 bestDist = 0xFFFFFFFF;
+        u8 bestIdx = 0;
+        for (j = 0; j < 16; j++)
+        {
+            u32 dist = GbaColorDistance(iconPal[i], normalBuf[j]);
+            if (dist < bestDist)
+            {
+                bestDist = dist;
+                bestIdx = j;
+            }
+        }
+        resultBuf[i] = shinyBuf[bestIdx];
+    }
+
+    pal.data = resultBuf;
+    pal.tag = tag;
+    LoadSpritePalette(&pal);
+}
+
+void FreeShinyMonIconPalette(u16 species)
+{
+    FreeSpritePaletteByTag(POKE_ICON_SHINY_PAL_TAG_BASE + species);
 }
 
 void FreeMonIconPalettes(void)

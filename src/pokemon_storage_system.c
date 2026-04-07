@@ -224,9 +224,6 @@ enum {
     PALTAG_MON_ICON_0 = 56000,
     PALTAG_MON_ICON_1, // Used implicitly in CreateMonIconSprite
     PALTAG_MON_ICON_2, // Used implicitly in CreateMonIconSprite
-    PALTAG_MON_ICON_0_SHINY, // Shiny icon palette variants
-    PALTAG_MON_ICON_1_SHINY,
-    PALTAG_MON_ICON_2_SHINY,
     PALTAG_DISPLAY_MON,
     PALTAG_MISC_1,
     PALTAG_MARKING_COMBO,
@@ -5260,11 +5257,22 @@ static struct Sprite *CreateMonIconSprite(u16 species, u32 personality, s16 x, s
 {
     u16 tileNum;
     u8 spriteId;
-    u8 palOffset = isShiny ? 3 : 0;
+    u16 paletteTag;
     struct SpriteTemplate template = sSpriteTemplate_MonIcon;
 
     species = GetIconSpecies(species, personality);
-    template.paletteTag = PALTAG_MON_ICON_0 + gMonIconPaletteIndices[species] + palOffset;
+
+    if (isShiny && species <= NUM_SPECIES && species != SPECIES_NONE)
+    {
+        LoadShinyMonIconPalette(species);
+        paletteTag = GetShinyMonIconPaletteTag(species);
+    }
+    else
+    {
+        paletteTag = PALTAG_MON_ICON_0 + gMonIconPaletteIndices[species];
+    }
+
+    template.paletteTag = paletteTag;
     tileNum = TryLoadMonIconTiles(species);
     if (tileNum == 0xFFFF)
         return NULL;
