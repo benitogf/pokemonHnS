@@ -7,6 +7,7 @@
 #include "pokemon_icon.h"
 #include "sprite.h"
 #include "constants/species.h"
+#include "data/pokemon_graphics/icon_pal_mapping.h"
 
 #define POKE_ICON_BASE_PAL_TAG 56000
 #define POKE_ICON_SHINY_PAL_TAG_BASE 57000
@@ -1306,14 +1307,6 @@ static bool32 SpeciesHasModernShiny(u16 species)
     }
 }
 
-static u32 GbaColorDistance(u16 c1, u16 c2)
-{
-    s32 r1 = c1 & 0x1F, g1 = (c1 >> 5) & 0x1F, b1 = (c1 >> 10) & 0x1F;
-    s32 r2 = c2 & 0x1F, g2 = (c2 >> 5) & 0x1F, b2 = (c2 >> 10) & 0x1F;
-    s32 dr = r1 - r2, dg = g1 - g2, db = b1 - b2;
-    return (u32)(dr * dr + dg * dg + db * db);
-}
-
 u16 GetShinyMonIconPaletteTag(u16 species)
 {
     return POKE_ICON_SHINY_PAL_TAG_BASE + species;
@@ -1325,10 +1318,9 @@ void LoadShinyMonIconPalette(u16 species)
     u8 palIndex;
     const u16 *iconPal;
     const struct CompressedSpritePalette *shinyPalSrc;
-    u16 normalBuf[16];
     u16 shinyBuf[16];
     u16 resultBuf[16];
-    u32 i, j;
+    u32 i;
     struct SpritePalette pal;
 
     // Already loaded
@@ -1341,39 +1333,23 @@ void LoadShinyMonIconPalette(u16 species)
     palIndex = gMonIconPaletteIndices[species];
     iconPal = gMonIconPalettes[palIndex];
 
-    // Decompress the species' normal and shiny sprite palettes
-    LZDecompressWram(gMonPaletteTable[species].data, normalBuf);
-
-    if (SpeciesHasModernShiny(species) && gSaveBlock1Ptr->tx_Features_ShinyColors == 1)
+    // Decompress the species' shiny sprite palette
+    shinyPalSrc = &gMonShinyPaletteTable[species];
+    if (gSaveBlock1Ptr != NULL
+     && SpeciesHasModernShiny(species)
+     && gSaveBlock1Ptr->tx_Features_ShinyColors == 1)
         shinyPalSrc = &gMonShinyPaletteTable_Modern[species];
-    else
-        shinyPalSrc = &gMonShinyPaletteTable[species];
 
     LZDecompressWram(shinyPalSrc->data, shinyBuf);
 
-    // For each icon palette color, find the nearest match in the normal
-    // sprite palette and replace with the corresponding shiny color
+    // Use precomputed mapping table to construct shiny icon palette
     for (i = 0; i < 16; i++)
     {
-        if (i == 0)
-        {
-            // Keep transparency color unchanged
-            resultBuf[i] = iconPal[0];
-            continue;
-        }
-
-        u32 bestDist = 0xFFFFFFFF;
-        u8 bestIdx = 0;
-        for (j = 0; j < 16; j++)
-        {
-            u32 dist = GbaColorDistance(iconPal[i], normalBuf[j]);
-            if (dist < bestDist)
-            {
-                bestDist = dist;
-                bestIdx = j;
-            }
-        }
-        resultBuf[i] = shinyBuf[bestIdx];
+        u8 mapped = sIconToSpritePalMap[species][i];
+        if (mapped != 0xFF)
+            resultBuf[i] = shinyBuf[mapped];
+        else
+            resultBuf[i] = iconPal[i]; // No good match, keep original
     }
 
     pal.data = resultBuf;
