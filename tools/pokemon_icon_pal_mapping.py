@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Generate per-species icon-to-sprite palette mapping tables.
+"""Generate precomputed shiny icon palettes via HSV color-shift.
 
-For each Pokemon species, maps each icon palette color to the nearest
-color in the species' normal battle sprite palette. This precomputed
-mapping lets the runtime construct shiny icon palettes by looking up
-the corresponding shiny palette color, producing accurate shiny icons.
+For each Pokemon species, computes the dominant color transformation
+between normal and shiny battle sprite palettes in HSV space, then
+applies that same transformation to the icon palette colors. This
+produces a natural-looking shiny icon that preserves icon art quality.
 
 Usage: python3 tools/pokemon_icon_pal_mapping.py
 Output: src/data/pokemon_graphics/icon_pal_mapping.h
 """
 
+import colorsys
+import math
 import os
 import re
 import sys
@@ -22,9 +24,17 @@ except ImportError:
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Squared Euclidean distance threshold in 8-bit RGB space.
-# Colors above this threshold get 0xFF (keep original icon color).
-DISTANCE_THRESHOLD = 12000
+# Species with modern shiny variants (must match SpeciesHasModernShiny in C)
+MODERN_SHINY_SPECIES = [
+    'SPECIES_PIKACHU', 'SPECIES_RAICHU', 'SPECIES_PICHU',
+    'SPECIES_VAPOREON', 'SPECIES_JOLTEON', 'SPECIES_FLAREON',
+    'SPECIES_REGICE', 'SPECIES_HERACROSS', 'SPECIES_HAUNTER',
+    'SPECIES_GENGAR', 'SPECIES_SCYTHER', 'SPECIES_BLAZIKEN',
+    'SPECIES_XATU', 'SPECIES_PARAS', 'SPECIES_CHINCHOU',
+    'SPECIES_LANTURN', 'SPECIES_ZAPDOS', 'SPECIES_ELEKID',
+    'SPECIES_FARFETCHD', 'SPECIES_MAROWAK', 'SPECIES_PHANPY',
+    'SPECIES_LAPRAS', 'SPECIES_TENTACOOL', 'SPECIES_TENTACRUEL',
+]
 
 
 def read_jasc_pal(path):
@@ -39,25 +49,115 @@ def read_jasc_pal(path):
     return colors[:16]
 
 
-def color_distance(c1, c2):
-    """Perceptual color distance using weighted Euclidean with redmean."""
-    r1, g1, b1 = c1
-    r2, g2, b2 = c2
-    rmean = (r1 + r2) // 2
-    dr, dg, db = r1 - r2, g1 - g2, b1 - b2
-    # Redmean formula weights channels by human perception
-    return (2 + rmean // 256) * dr * dr + 4 * dg * dg + (2 + (255 - rmean) // 256) * db * db
+def rgb_to_hsv(r, g, b):
+    """Convert 8-bit RGB to HSV (h=0-360, s=0-1, v=0-1)."""
+    h, s, v = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
+    return h * 360.0, s, v
 
 
-def get_icon_info(icon_path):
-    """Read icon.png, return (set of used palette indices, palette colors)."""
+def hsv_to_rgb(h, s, v):
+    """Convert HSV to 8-bit RGB."""
+    h = h % 360.0
+    s = max(0.0, min(1.0, s))
+    v = max(0.0, min(1.0, v))
+    r, g, b = colorsys.hsv_to_rgb(h / 360.0, s, v)
+    return int(round(r * 255)), int(round(g * 255)), int(round(b * 255))
+
+
+def rgb_to_gba(r, g, b):
+    """Convert 8-bit RGB to 15-bit GBA color (5 bits per channel)."""
+    r5 = (r >> 3) & 0x1F
+    g5 = (g >> 3) & 0x1F
+    b5 = (b >> 3) & 0x1F
+    return r5 | (g5 << 5) | (b5 << 10)
+
+
+def is_grey(r, g, b, threshold=20):
+    """Check if a color is greyscale (low saturation)."""
+    return max(r, g, b) - min(r, g, b) < threshold
+
+
+def compute_palette_shift(normal_pal, shiny_pal):
+    """Compute the dominant HSV shift between normal and shiny palettes.
+
+    Returns (delta_hue, sat_ratio, val_ratio) computed from the most
+    chromatic (non-grey) colors that actually change between palettes.
+    """
+    hue_shifts = []
+    sat_ratios = []
+    val_ratios = []
+
+    for i in range(1, 16):  # Skip transparency at 0
+        nr, ng, nb = normal_pal[i]
+        sr, sg, sb = shiny_pal[i]
+
+        # Skip identical colors
+        if (nr, ng, nb) == (sr, sg, sb):
+            continue
+
+        nh, ns, nv = rgb_to_hsv(nr, ng, nb)
+        sh, ss, sv = rgb_to_hsv(sr, sg, sb)
+
+        # Weight by saturation - chromatic colors matter more
+        weight = ns
+        if weight < 0.08:
+            # Very grey normal color - still compute val shift
+            if nv > 0.05:
+                val_ratios.append((sv / nv if nv > 0 else 1.0, 0.3))
+            continue
+
+        # Hue shift (handle circular wraparound)
+        dh = sh - nh
+        if dh > 180:
+            dh -= 360
+        elif dh < -180:
+            dh += 360
+
+        hue_shifts.append((dh, weight))
+        sat_ratios.append((ss / ns if ns > 0 else 1.0, weight))
+        val_ratios.append((sv / nv if nv > 0 else 1.0, weight))
+
+    # Weighted averages
+    def wavg(pairs, default):
+        total_w = sum(w for _, w in pairs)
+        if total_w < 0.01:
+            return default
+        return sum(v * w for v, w in pairs) / total_w
+
+    dh = wavg(hue_shifts, 0.0)
+    sr = wavg(sat_ratios, 1.0)
+    vr = wavg(val_ratios, 1.0)
+
+    return dh, sr, vr
+
+
+def apply_shift(color, dh, sr, vr, is_used):
+    """Apply HSV shift to a single RGB color. Returns shifted (R,G,B)."""
+    r, g, b = color
+    if not is_used:
+        return color  # Don't shift unused palette entries
+
+    h, s, v = rgb_to_hsv(r, g, b)
+
+    # For very dark or very light colors, only adjust value
+    if s < 0.08:
+        new_v = min(1.0, v * vr)
+        return hsv_to_rgb(h, s, new_v)
+
+    new_h = (h + dh) % 360.0
+    new_s = max(0.0, min(1.0, s * sr))
+    new_v = max(0.0, min(1.0, v * vr))
+
+    return hsv_to_rgb(new_h, new_s, new_v)
+
+
+def get_used_indices(icon_path):
+    """Read icon.png, return set of used palette indices."""
     img = Image.open(icon_path)
     if img.mode != 'P':
-        return set(), []
-    pixels = list(img.getdata())
-    pal_raw = img.getpalette()
-    palette = [(pal_raw[i * 3], pal_raw[i * 3 + 1], pal_raw[i * 3 + 2]) for i in range(16)]
-    return set(pixels), palette
+        return set()
+    pixels = img.tobytes()
+    return set(pixels)
 
 
 def parse_species_ids(path):
@@ -145,9 +245,9 @@ def main():
             species_dirs[sp_name] = icon_paths[symbol]
 
     # Process each species
-    mappings = {}
-    warnings = []
-    stats = {'good': 0, 'poor': 0, 'unmapped': 0}
+    std_palettes = {}   # species_name -> [16 GBA u16 colors]
+    mod_palettes = {}   # species_name -> [16 GBA u16 colors] (modern shiny)
+    stats = {'processed': 0, 'modern': 0, 'no_change': 0}
 
     for sp_name in sorted(species_dirs.keys(), key=lambda x: species_ids.get(x, 9999)):
         sp_id = species_ids.get(sp_name, 0)
@@ -159,76 +259,103 @@ def main():
         gfx_dir = os.path.join(PROJECT_ROOT, species_dirs[sp_name])
         icon_path = os.path.join(gfx_dir, 'icon.png')
         normal_pal_path = os.path.join(gfx_dir, 'normal.pal')
+        shiny_pal_path = os.path.join(gfx_dir, 'shiny.pal')
 
         if not os.path.exists(icon_path) or not os.path.exists(normal_pal_path):
+            continue
+        if not os.path.exists(shiny_pal_path):
             continue
 
         pal_idx = pal_indices[sp_name]
         if pal_idx >= len(icon_pals):
             continue
+
         icon_palette = icon_pals[pal_idx]
         normal_pal = read_jasc_pal(normal_pal_path)
+        shiny_pal = read_jasc_pal(shiny_pal_path)
+        used_indices = get_used_indices(icon_path)
 
-        used_indices, _png_pal = get_icon_info(icon_path)
+        # Compute standard shiny shift and apply to icon palette
+        dh, sr, vr = compute_palette_shift(normal_pal, shiny_pal)
 
-        # Compute mapping
-        mapping = [0xFF] * 16
-        mapping[0] = 0  # Transparency
+        gba_colors = []
+        for i in range(16):
+            shifted = apply_shift(icon_palette[i], dh, sr, vr, i in used_indices and i > 0)
+            gba_colors.append(rgb_to_gba(*shifted))
 
-        for i in range(1, 16):
-            if i not in used_indices:
-                continue
+        # Keep transparency color unchanged
+        gba_colors[0] = rgb_to_gba(*icon_palette[0])
 
-            icon_color = icon_palette[i]
+        std_palettes[sp_name] = gba_colors
+        stats['processed'] += 1
 
-            best_dist = 999999
-            best_idx = 0
-            for j in range(16):
-                d = color_distance(icon_color, normal_pal[j])
-                if d < best_dist:
-                    best_dist = d
-                    best_idx = j
+        # Check if normal and shiny are identical (no shift)
+        if all(std_palettes[sp_name][i] == rgb_to_gba(*icon_palette[i]) for i in range(16)):
+            stats['no_change'] += 1
 
-            if best_dist <= DISTANCE_THRESHOLD:
-                mapping[i] = best_idx
-                stats['good'] += 1
-            else:
-                mapping[i] = 0xFF
-                stats['poor'] += 1
-                warnings.append(
-                    f"  {sp_name}[{i}]: icon{icon_color} best=normal[{best_idx}]{normal_pal[best_idx]} dist={best_dist}"
-                )
+        # Modern shiny variant
+        if sp_name in MODERN_SHINY_SPECIES:
+            mod_shiny_path = os.path.join(gfx_dir, 'shiny_modern.pal')
+            if os.path.exists(mod_shiny_path):
+                mod_shiny_pal = read_jasc_pal(mod_shiny_path)
+                dh_m, sr_m, vr_m = compute_palette_shift(normal_pal, mod_shiny_pal)
 
-        mappings[sp_name] = mapping
+                mod_gba = []
+                for i in range(16):
+                    shifted = apply_shift(icon_palette[i], dh_m, sr_m, vr_m, i in used_indices and i > 0)
+                    mod_gba.append(rgb_to_gba(*shifted))
+                mod_gba[0] = rgb_to_gba(*icon_palette[0])
+
+                mod_palettes[sp_name] = mod_gba
+                stats['modern'] += 1
 
     # Print summary
-    print(f"Processed {len(mappings)} species")
-    print(f"  Good matches: {stats['good']}")
-    print(f"  Poor matches (kept original): {stats['poor']}")
-    if warnings:
-        print(f"\nPoor matches (above threshold {DISTANCE_THRESHOLD}):")
-        for w in warnings[:40]:
-            print(w)
-        if len(warnings) > 40:
-            print(f"  ... and {len(warnings) - 40} more")
+    print(f"Processed {stats['processed']} species")
+    print(f"  Modern shiny variants: {stats['modern']}")
+    print(f"  No visible change: {stats['no_change']}")
+
+    # Show sample transformations
+    for sample in ['SPECIES_GENGAR', 'SPECIES_SANDSLASH', 'SPECIES_PIKACHU']:
+        if sample in std_palettes and sample in species_dirs:
+            gfx_dir = os.path.join(PROJECT_ROOT, species_dirs[sample])
+            normal = read_jasc_pal(os.path.join(gfx_dir, 'normal.pal'))
+            shiny = read_jasc_pal(os.path.join(gfx_dir, 'shiny.pal'))
+            pal_idx = pal_indices[sample]
+            icon_pal = icon_pals[pal_idx]
+            used = get_used_indices(os.path.join(gfx_dir, 'icon.png'))
+            dh, sr, vr = compute_palette_shift(normal, shiny)
+            print(f"\n  {sample}: dH={dh:+.1f}° sR={sr:.2f} vR={vr:.2f}")
+            for i in sorted(used):
+                if i == 0:
+                    continue
+                orig = icon_pal[i]
+                shifted = apply_shift(orig, dh, sr, vr, True)
+                print(f"    [{i:2d}] {orig} -> {shifted}")
+            if sample in mod_palettes:
+                mod_shiny = read_jasc_pal(os.path.join(gfx_dir, 'shiny_modern.pal'))
+                dh_m, sr_m, vr_m = compute_palette_shift(normal, mod_shiny)
+                print(f"    Modern: dH={dh_m:+.1f}° sR={sr_m:.2f} vR={vr_m:.2f}")
 
     # Write C header
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, 'w') as f:
         f.write("// Auto-generated by tools/pokemon_icon_pal_mapping.py\n")
-        f.write("// Maps icon palette indices to normal.pal indices for shiny icon palettes.\n")
-        f.write("// 0xFF = no good mapping, keep original icon palette color.\n")
+        f.write("// Precomputed shiny icon palettes using HSV color-shift.\n")
         f.write("// Regenerate with: python3 tools/pokemon_icon_pal_mapping.py\n\n")
 
-        f.write("static const u8 sIconToSpritePalMap[NUM_SPECIES + 1][16] =\n{\n")
-
-        # Write in species ID order
+        f.write("static const u16 sShinyIconPalettes[NUM_SPECIES + 1][16] =\n{\n")
         for sp_name, sp_id in sorted(species_ids.items(), key=lambda x: x[1]):
-            if sp_name in mappings:
-                m = mappings[sp_name]
-                vals = ', '.join(f'0x{v:02X}' for v in m)
+            if sp_name in std_palettes:
+                vals = ', '.join(f'0x{v:04X}' for v in std_palettes[sp_name])
                 f.write(f"    [{sp_name}] = {{ {vals} }},\n")
+        f.write("};\n\n")
 
+        # Modern shiny palettes - separate table indexed by species ID
+        f.write("static const u16 sShinyModernIconPalettes[NUM_SPECIES + 1][16] =\n{\n")
+        for sp_name, sp_id in sorted(species_ids.items(), key=lambda x: x[1]):
+            if sp_name in mod_palettes:
+                vals = ', '.join(f'0x{v:04X}' for v in mod_palettes[sp_name])
+                f.write(f"    [{sp_name}] = {{ {vals} }},\n")
         f.write("};\n")
 
     print(f"\nWrote {output_path}")

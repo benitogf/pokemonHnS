@@ -1,6 +1,4 @@
 #include "global.h"
-#include "data.h"
-#include "decompress.h"
 #include "graphics.h"
 #include "mail.h"
 #include "palette.h"
@@ -1315,12 +1313,7 @@ u16 GetShinyMonIconPaletteTag(u16 species)
 void LoadShinyMonIconPalette(u16 species)
 {
     u16 tag = POKE_ICON_SHINY_PAL_TAG_BASE + species;
-    u8 palIndex;
-    const u16 *iconPal;
-    const struct CompressedSpritePalette *shinyPalSrc;
-    u16 shinyBuf[16];
-    u16 resultBuf[16];
-    u32 i;
+    const u16 *palData;
     struct SpritePalette pal;
 
     // Already loaded
@@ -1330,29 +1323,15 @@ void LoadShinyMonIconPalette(u16 species)
     if (species > NUM_SPECIES)
         species = INVALID_ICON_SPECIES;
 
-    palIndex = gMonIconPaletteIndices[species];
-    iconPal = gMonIconPalettes[palIndex];
-
-    // Decompress the species' shiny sprite palette
-    shinyPalSrc = &gMonShinyPaletteTable[species];
+    // Select precomputed shiny icon palette (standard or modern)
     if (gSaveBlock1Ptr != NULL
      && SpeciesHasModernShiny(species)
      && gSaveBlock1Ptr->tx_Features_ShinyColors == 1)
-        shinyPalSrc = &gMonShinyPaletteTable_Modern[species];
+        palData = sShinyModernIconPalettes[species];
+    else
+        palData = sShinyIconPalettes[species];
 
-    LZDecompressWram(shinyPalSrc->data, shinyBuf);
-
-    // Use precomputed mapping table to construct shiny icon palette
-    for (i = 0; i < 16; i++)
-    {
-        u8 mapped = sIconToSpritePalMap[species][i];
-        if (mapped != 0xFF)
-            resultBuf[i] = shinyBuf[mapped];
-        else
-            resultBuf[i] = iconPal[i]; // No good match, keep original
-    }
-
-    pal.data = resultBuf;
+    pal.data = palData;
     pal.tag = tag;
     LoadSpritePalette(&pal);
 }
