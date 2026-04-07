@@ -1327,22 +1327,38 @@ static bool32 SpeciesHasModernShiny(u16 species)
 void LoadShinyMonIconPalette(u16 species)
 {
     u16 tag = POKE_ICON_SHINY_PAL_TAG_BASE + species;
-    struct CompressedSpritePalette pal;
 
     if (species > NUM_SPECIES || species == SPECIES_NONE)
         return;
 
     FreeSpritePaletteByTag(tag);
 
-    if (gSaveBlock1Ptr != NULL
-     && gSaveBlock1Ptr->tx_Features_ShinyColors == 1
-     && SpeciesHasModernShiny(species))
-        pal.data = gMonShinyPaletteTable_Modern[species].data;
-    else
-        pal.data = gMonShinyPaletteTable[species].data;
+    // Check for follower palette override (custom shiny palette for overworld match)
+    {
+        extern const void *const gFollowerPalettes[][2];
+        extern const u32 gFollowerPalettesSize;
+        if (species < gFollowerPalettesSize && gFollowerPalettes[species][1] != NULL)
+        {
+            struct SpritePalette rawPal;
+            rawPal.data = gFollowerPalettes[species][1];
+            rawPal.tag = tag;
+            LoadSpritePalette(&rawPal);
+            return;
+        }
+    }
 
-    pal.tag = tag;
-    LoadCompressedSpritePalette(&pal);
+    {
+        struct CompressedSpritePalette pal;
+        if (gSaveBlock1Ptr != NULL
+         && gSaveBlock1Ptr->tx_Features_ShinyColors == 1
+         && SpeciesHasModernShiny(species))
+            pal.data = gMonShinyPaletteTable_Modern[species].data;
+        else
+            pal.data = gMonShinyPaletteTable[species].data;
+
+        pal.tag = tag;
+        LoadCompressedSpritePalette(&pal);
+    }
 }
 
 void FreeShinyMonIconPalette(u16 species)

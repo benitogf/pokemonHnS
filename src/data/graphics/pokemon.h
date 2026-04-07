@@ -191,6 +191,7 @@ const u32 gMonStillFrontPic_Sandslash[] = INCBIN_U32("graphics/pokemon/sandslash
 const u32 gMonPalette_Sandslash[] = INCBIN_U32("graphics/pokemon/sandslash/normal.gbapal.lz");
 const u32 gMonBackPic_Sandslash[] = INCBIN_U32("graphics/pokemon/sandslash/back.4bpp.lz");
 const u32 gMonShinyPalette_Sandslash[] = INCBIN_U32("graphics/pokemon/sandslash/shiny.gbapal.lz");
+const u16 gMonFollowerShinyPalette_Sandslash[] = INCBIN_U16("graphics/pokemon/sandslash/follower_shiny.gbapal");
 const u8 gMonIcon_Sandslash[] = INCBIN_U8("graphics/pokemon/sandslash/icon.4bpp");
 const u8 gMonFootprint_Sandslash[] = INCBIN_U8("graphics/pokemon/sandslash/footprint.1bpp");
 

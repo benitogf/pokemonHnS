@@ -48,6 +48,45 @@ def to_species_constant(species_name):
     return "SPECIES_" + species_name.upper()
 
 
+def content_center_y(frame):
+    """Return the vertical center of non-background pixels in a 32x32 indexed frame."""
+    first_row = FRAME_SIZE
+    last_row = 0
+    for y in range(FRAME_SIZE):
+        for x in range(FRAME_SIZE):
+            if frame.getpixel((x, y)) != 0:
+                first_row = min(first_row, y)
+                last_row = max(last_row, y)
+                break
+    if first_row > last_row:
+        return FRAME_SIZE // 2
+    return (first_row + last_row) / 2.0
+
+
+def calc_vertical_shift(follower_frame, species_dir):
+    """Calculate pixels to shift follower frame to align with standard icon center."""
+    icon_path = os.path.join(species_dir, "icon.png")
+    if not os.path.exists(icon_path):
+        return 0
+    try:
+        icon = Image.open(icon_path)
+        icon_frame = icon.crop((0, 0, FRAME_SIZE, FRAME_SIZE))
+    except Exception:
+        return 0
+    icon_center = content_center_y(icon_frame)
+    follower_center = content_center_y(follower_frame)
+    return round(icon_center - follower_center)
+
+
+def shift_frame(frame, dy, palette):
+    """Shift an indexed 32x32 frame by dy pixels vertically (negative = up)."""
+    shifted = Image.new("P", (FRAME_SIZE, FRAME_SIZE))
+    shifted.putpalette(palette)
+    # Paste the frame at the offset position; pixels outside the frame stay as index 0 (bg)
+    shifted.paste(frame, (0, dy))
+    return shifted
+
+
 def main():
     os.chdir(os.path.join(os.path.dirname(__file__), ".."))
 
@@ -108,6 +147,13 @@ def main():
         # Extract frames 0 and 1 (first two 32x32 areas from left)
         frame0 = img.crop((0, 0, FRAME_SIZE, FRAME_SIZE))
         frame1 = img.crop((FRAME_SIZE, 0, FRAME_SIZE * 2, FRAME_SIZE))
+
+        # Calculate vertical shift to align with standard icon center
+        y_shift = calc_vertical_shift(frame0, species_dirs[species_name])
+
+        if y_shift != 0:
+            frame0 = shift_frame(frame0, y_shift, img.getpalette())
+            frame1 = shift_frame(frame1, y_shift, img.getpalette())
 
         # Create 32x64 indexed-color PNG (frame 0 on top, frame 1 below)
         result = Image.new("P", (FRAME_SIZE, FRAME_SIZE * 2))

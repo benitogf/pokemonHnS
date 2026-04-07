@@ -481,7 +481,10 @@ const void* const gFollowerPalettes[][2] =
     // Must have at least one entry, or ARRAY_COUNT comparison fails
     // (SPECIES_NONE does not use OBJ_EVENT_PAL_TAG_DYNAMIC anyway)
     [SPECIES_NONE] = {gMonPalette_CircledQuestionMark, gMonShinyPalette_CircledQuestionMark},
+    [SPECIES_SANDSLASH] = {NULL, gMonFollowerShinyPalette_Sandslash},
 };
+
+const u32 gFollowerPalettesSize = ARRAY_COUNT(gFollowerPalettes);
 
 #if OW_MON_POKEBALLS
 

@@ -250,6 +250,7 @@ extern const u32 gMonFrontPic_Sandslash[];
 extern const u32 gMonPalette_Sandslash[];
 extern const u32 gMonBackPic_Sandslash[];
 extern const u32 gMonShinyPalette_Sandslash[];
+extern const u16 gMonFollowerShinyPalette_Sandslash[];
 extern const u32 gMonStillFrontPic_Sandslash[];
 extern const u8 gMonIcon_Sandslash[];
 extern const u8 gMonFootprint_Sandslash[];
