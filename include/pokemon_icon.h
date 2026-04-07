@@ -1,6 +1,9 @@
 #ifndef GUARD_POKEMON_ICON_H
 #define GUARD_POKEMON_ICON_H
 
+#define POKE_ICON_BASE_PAL_TAG 56000
+#define POKE_ICON_SHINY_PAL_TAG_BASE 57000
+
 extern const u8 gMonIconPaletteIndices[];
 extern const u8 *const gMonIconTable[];
 extern const struct SpritePalette gMonIconPaletteTable[];
@@ -21,6 +24,7 @@ void FreeMonIconPalette(u16 species);
 void FreeAndDestroyMonIconSprite(struct Sprite *sprite);
 void LoadShinyMonIconPalette(u16 species);
 void FreeShinyMonIconPalette(u16 species);
+const u8 *GetFollowerIconTiles(u16 species);
 u8 CreateMonIcon(u16 species, void (*callback)(struct Sprite *), s16 x, s16 y, u8 subpriority, u32 personality, bool32 handleDeoxys, bool32 isShiny);
 u8 UpdateMonIconFrame(struct Sprite *sprite);
 void LoadMonIconPalette(u16 species);

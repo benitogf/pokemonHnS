@@ -5,12 +5,11 @@
 #include "mail.h"
 #include "palette.h"
 #include "pokemon_icon.h"
+#include "malloc.h"
 #include "sprite.h"
 #include "constants/species.h"
-#include "data/pokemon_graphics/follower_icon_table.h"
 
-#define POKE_ICON_BASE_PAL_TAG 56000
-#define POKE_ICON_SHINY_PAL_TAG_BASE 57000
+extern const struct ObjectEventGraphicsInfo gPokemonObjectGraphics[];
 
 #define INVALID_ICON_SPECIES SPECIES_OLD_UNOWN_J // Oddly specific, used when an icon should be a ?. Any of the 'old unown' would work
 
@@ -1140,13 +1139,34 @@ u8 CreateMonIcon(u16 species, void (*callback)(struct Sprite *), s16 x, s16 y, u
     u8 spriteId;
     const u8 *image;
     u16 paletteTag;
+    u8 *allocatedTiles = NULL;
 
-    if (isShiny && species <= NUM_SPECIES && species != SPECIES_NONE
-        && sFollowerIconTable[species] != NULL)
+    if (isShiny && species <= NUM_SPECIES && species != SPECIES_NONE)
     {
-        image = sFollowerIconTable[species];
-        LoadShinyMonIconPalette(species);
-        paletteTag = POKE_ICON_SHINY_PAL_TAG_BASE + species;
+        const u8 *tempTiles = GetFollowerIconTiles(species);
+        if (tempTiles != NULL)
+        {
+            // Allocate persistent copy — tempTiles may be in gDecompressionBuffer
+            // which gets overwritten by LoadShinyMonIconPalette below
+            allocatedTiles = Alloc(0x400);
+            if (allocatedTiles != NULL)
+            {
+                CpuCopy32(tempTiles, allocatedTiles, 0x400);
+                image = allocatedTiles;
+                LoadShinyMonIconPalette(species);
+                paletteTag = POKE_ICON_SHINY_PAL_TAG_BASE + species;
+            }
+            else
+            {
+                image = GetMonIconPtr(species, personality, handleDeoxys);
+                paletteTag = POKE_ICON_BASE_PAL_TAG + gMonIconPaletteIndices[species];
+            }
+        }
+        else
+        {
+            image = GetMonIconPtr(species, personality, handleDeoxys);
+            paletteTag = POKE_ICON_BASE_PAL_TAG + gMonIconPaletteIndices[species];
+        }
     }
     else
     {
@@ -1169,6 +1189,9 @@ u8 CreateMonIcon(u16 species, void (*callback)(struct Sprite *), s16 x, s16 y, u
 
         spriteId = CreateMonIconSprite(&iconTemplate, x, y, subpriority);
     }
+
+    if (allocatedTiles != NULL)
+        gSprites[spriteId].data[6] = TRUE;
 
     UpdateMonIconFrame(&gSprites[spriteId]);
 
@@ -1398,6 +1421,109 @@ const u8 *GetMonIconTiles(u16 species, bool32 handleDeoxys)
     return iconSprite;
 }
 
+// Scan a 32x32 4bpp tile frame (4x4 tiles, 1D mapping) to find the
+// vertical center of all non-transparent pixel content.
+static s32 CalcContentCenterY(const u8 *frameData)
+{
+    s32 y, col;
+    s32 topRow = 31;
+    s32 bottomRow = 0;
+    bool32 found = FALSE;
+
+    for (y = 0; y < 32; y++)
+    {
+        for (col = 0; col < 4; col++)
+        {
+            u32 tileIdx = (y / 8) * 4 + col;
+            u32 offset = tileIdx * 32 + (y % 8) * 4;
+
+            if (*(const u32 *)(frameData + offset) != 0)
+            {
+                if (y < topRow)
+                    topRow = y;
+                if (y > bottomRow)
+                    bottomRow = y;
+                found = TRUE;
+                break;
+            }
+        }
+    }
+
+    if (!found)
+        return 16;
+
+    return (topRow + bottomRow) / 2;
+}
+
+// Shift a 32x32 4bpp tile frame (4x4 tiles, 1D mapping) up by `shift`
+// pixel rows in place. Bottom rows are zeroed out.
+static void ShiftFrameUp(u8 *frameData, s32 shift)
+{
+    s32 y, col;
+
+    for (y = 0; y < 32 - shift; y++)
+    {
+        s32 srcY = y + shift;
+
+        for (col = 0; col < 4; col++)
+        {
+            u32 srcTile = (srcY / 8) * 4 + col;
+            u32 srcOff = srcTile * 32 + (srcY % 8) * 4;
+            u32 dstTile = (y / 8) * 4 + col;
+            u32 dstOff = dstTile * 32 + (y % 8) * 4;
+
+            *(u32 *)(frameData + dstOff) = *(u32 *)(frameData + srcOff);
+        }
+    }
+
+    for (y = 32 - shift; y < 32; y++)
+    {
+        for (col = 0; col < 4; col++)
+        {
+            u32 tile = (y / 8) * 4 + col;
+            u32 off = tile * 32 + (y % 8) * 4;
+
+            *(u32 *)(frameData + off) = 0;
+        }
+    }
+}
+
+#define FOLLOWER_FRAME_SIZE 0x200
+
+const u8 *GetFollowerIconTiles(u16 species)
+{
+    const struct ObjectEventGraphicsInfo *info;
+    s32 followerCenter, iconCenter, shift;
+
+    if (species > NUM_SPECIES || species == SPECIES_NONE)
+        return NULL;
+
+    info = &gPokemonObjectGraphics[species];
+
+    // Skip species with no follower sprite or oversized (64x64) sprites
+    if (info->images == NULL || info->width != 32 || info->height != 32)
+        return NULL;
+
+    // Decompress (or copy) follower tiles into gDecompressionBuffer
+    if (info->compressed)
+        LZ77UnCompWram((const u32 *)info->images[0].data, gDecompressionBuffer);
+    else
+        CpuCopy32(info->images[0].data, gDecompressionBuffer, FOLLOWER_FRAME_SIZE * 2);
+
+    // Align follower content center with standard icon content center
+    followerCenter = CalcContentCenterY(gDecompressionBuffer);
+    iconCenter = CalcContentCenterY(gMonIconTable[species]);
+    shift = followerCenter - iconCenter;
+
+    if (shift > 0)
+    {
+        ShiftFrameUp(gDecompressionBuffer, shift);
+        ShiftFrameUp(gDecompressionBuffer + FOLLOWER_FRAME_SIZE, shift);
+    }
+
+    return gDecompressionBuffer;
+}
+
 void TryLoadAllMonIconPalettesAtOffset(u16 offset)
 {
     s32 i;
@@ -1493,6 +1619,11 @@ static u8 CreateMonIconSprite(struct MonIconSpriteTemplate *iconTemplate, s16 x,
 static void FreeAndDestroyMonIconSprite_(struct Sprite *sprite)
 {
     struct SpriteFrameImage image = { NULL, sSpriteImageSizes[sprite->oam.shape][sprite->oam.size] };
+
+    // Free heap-allocated shiny follower tile data
+    if (sprite->data[6])
+        Free((void *)sprite->images);
+
     sprite->images = &image;
     DestroySprite(sprite);
 }
