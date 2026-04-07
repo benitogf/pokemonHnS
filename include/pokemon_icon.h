@@ -3,6 +3,7 @@
 
 #define POKE_ICON_BASE_PAL_TAG 56000
 #define POKE_ICON_SHINY_PAL_TAG_BASE 57000
+#define POKE_ICON_FOLLOWER_PAL_TAG 58000
 
 extern const u8 gMonIconPaletteIndices[];
 extern const u8 *const gMonIconTable[];

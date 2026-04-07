@@ -1091,6 +1091,69 @@ static const union AnimCmd *const sMonIconAnims[] =
     sAnim_4,
 };
 
+// Follower rotation animations — cycle through all 6 directions
+// Frames: 0=down, 1=down-walk, 2=up, 3=up-walk, 4=left, 5=left-walk
+
+static const union AnimCmd sFollowerAnim_0[] =
+{
+    ANIMCMD_FRAME(0, 12),
+    ANIMCMD_FRAME(1, 12),
+    ANIMCMD_FRAME(2, 12),
+    ANIMCMD_FRAME(3, 12),
+    ANIMCMD_FRAME(4, 12),
+    ANIMCMD_FRAME(5, 12),
+    ANIMCMD_JUMP(0),
+};
+
+static const union AnimCmd sFollowerAnim_1[] =
+{
+    ANIMCMD_FRAME(0, 16),
+    ANIMCMD_FRAME(1, 16),
+    ANIMCMD_FRAME(2, 16),
+    ANIMCMD_FRAME(3, 16),
+    ANIMCMD_FRAME(4, 16),
+    ANIMCMD_FRAME(5, 16),
+    ANIMCMD_JUMP(0),
+};
+
+static const union AnimCmd sFollowerAnim_2[] =
+{
+    ANIMCMD_FRAME(0, 22),
+    ANIMCMD_FRAME(1, 22),
+    ANIMCMD_FRAME(2, 22),
+    ANIMCMD_FRAME(3, 22),
+    ANIMCMD_FRAME(4, 22),
+    ANIMCMD_FRAME(5, 22),
+    ANIMCMD_JUMP(0),
+};
+
+static const union AnimCmd sFollowerAnim_3[] =
+{
+    ANIMCMD_FRAME(0, 30),
+    ANIMCMD_FRAME(1, 30),
+    ANIMCMD_FRAME(2, 30),
+    ANIMCMD_FRAME(3, 30),
+    ANIMCMD_FRAME(4, 30),
+    ANIMCMD_FRAME(5, 30),
+    ANIMCMD_JUMP(0),
+};
+
+static const union AnimCmd sFollowerAnim_4[] =
+{
+    ANIMCMD_FRAME(0, 29),
+    ANIMCMD_FRAME(0, 29),
+    ANIMCMD_JUMP(0),
+};
+
+static const union AnimCmd *const sFollowerIconAnims[] =
+{
+    sFollowerAnim_0,
+    sFollowerAnim_1,
+    sFollowerAnim_2,
+    sFollowerAnim_3,
+    sFollowerAnim_4,
+};
+
 static const union AffineAnimCmd sAffineAnim_0[] =
 {
     AFFINEANIMCMD_FRAME(0, 0, 0, 10),
@@ -1134,27 +1197,44 @@ static const u16 sSpriteImageSizes[3][4] =
     },
 };
 
+#define FOLLOWER_FRAME_SIZE 0x200
+#define FOLLOWER_NUM_FRAMES 6
+#define FOLLOWER_ALL_FRAMES_SIZE (FOLLOWER_FRAME_SIZE * FOLLOWER_NUM_FRAMES)
+
+static const u8 *GetAllFollowerIconTiles(u16 species);
+static void LoadNormalFollowerIconPalette(u16 species);
+
 u8 CreateMonIcon(u16 species, void (*callback)(struct Sprite *), s16 x, s16 y, u8 subpriority, u32 personality, bool32 handleDeoxys, bool32 isShiny)
 {
     u8 spriteId;
     const u8 *image;
     u16 paletteTag;
     u8 *allocatedTiles = NULL;
+    const union AnimCmd *const *anims = sMonIconAnims;
 
-    if (isShiny && species <= NUM_SPECIES && species != SPECIES_NONE)
+    // Try follower sprites for all valid species
+    if (species <= NUM_SPECIES && species != SPECIES_NONE)
     {
-        const u8 *tempTiles = GetFollowerIconTiles(species);
+        const u8 *tempTiles = GetAllFollowerIconTiles(species);
         if (tempTiles != NULL)
         {
-            // Allocate persistent copy — tempTiles may be in gDecompressionBuffer
-            // which gets overwritten by LoadShinyMonIconPalette below
-            allocatedTiles = Alloc(0x400);
+            allocatedTiles = Alloc(FOLLOWER_ALL_FRAMES_SIZE);
             if (allocatedTiles != NULL)
             {
-                CpuCopy32(tempTiles, allocatedTiles, 0x400);
+                CpuCopy32(tempTiles, allocatedTiles, FOLLOWER_ALL_FRAMES_SIZE);
                 image = allocatedTiles;
-                LoadShinyMonIconPalette(species);
-                paletteTag = POKE_ICON_SHINY_PAL_TAG_BASE + species;
+                anims = sFollowerIconAnims;
+
+                if (isShiny)
+                {
+                    LoadShinyMonIconPalette(species);
+                    paletteTag = POKE_ICON_SHINY_PAL_TAG_BASE + species;
+                }
+                else
+                {
+                    LoadNormalFollowerIconPalette(species);
+                    paletteTag = POKE_ICON_FOLLOWER_PAL_TAG + species;
+                }
             }
             else
             {
@@ -1181,7 +1261,7 @@ u8 CreateMonIcon(u16 species, void (*callback)(struct Sprite *), s16 x, s16 y, u
         {
             .oam = &sMonIconOamData,
             .image = image,
-            .anims = sMonIconAnims,
+            .anims = anims,
             .affineAnims = sMonIconAffineAnims,
             .callback = callback,
             .paletteTag = paletteTag,
@@ -1201,18 +1281,59 @@ u8 CreateMonIcon(u16 species, void (*callback)(struct Sprite *), s16 x, s16 y, u
 u8 CreateMonIconNoPersonality(u16 species, void (*callback)(struct Sprite *), s16 x, s16 y, u8 subpriority, bool32 handleDeoxys)
 {
     u8 spriteId;
-    struct MonIconSpriteTemplate iconTemplate =
-    {
-        .oam = &sMonIconOamData,
-        .image = NULL,
-        .anims = sMonIconAnims,
-        .affineAnims = sMonIconAffineAnims,
-        .callback = callback,
-        .paletteTag = POKE_ICON_BASE_PAL_TAG + gMonIconPaletteIndices[species],
-    };
+    u8 *allocatedTiles = NULL;
+    const union AnimCmd *const *anims = sMonIconAnims;
+    const u8 *image;
+    u16 paletteTag;
 
-    iconTemplate.image = GetMonIconTiles(species, handleDeoxys);
-    spriteId = CreateMonIconSprite(&iconTemplate, x, y, subpriority);
+    if (species <= NUM_SPECIES && species != SPECIES_NONE)
+    {
+        const u8 *tempTiles = GetAllFollowerIconTiles(species);
+        if (tempTiles != NULL)
+        {
+            allocatedTiles = Alloc(FOLLOWER_ALL_FRAMES_SIZE);
+            if (allocatedTiles != NULL)
+            {
+                CpuCopy32(tempTiles, allocatedTiles, FOLLOWER_ALL_FRAMES_SIZE);
+                image = allocatedTiles;
+                anims = sFollowerIconAnims;
+                LoadNormalFollowerIconPalette(species);
+                paletteTag = POKE_ICON_FOLLOWER_PAL_TAG + species;
+            }
+            else
+            {
+                image = GetMonIconTiles(species, handleDeoxys);
+                paletteTag = POKE_ICON_BASE_PAL_TAG + gMonIconPaletteIndices[species];
+            }
+        }
+        else
+        {
+            image = GetMonIconTiles(species, handleDeoxys);
+            paletteTag = POKE_ICON_BASE_PAL_TAG + gMonIconPaletteIndices[species];
+        }
+    }
+    else
+    {
+        image = GetMonIconTiles(species, handleDeoxys);
+        paletteTag = POKE_ICON_BASE_PAL_TAG + gMonIconPaletteIndices[species];
+    }
+
+    {
+        struct MonIconSpriteTemplate iconTemplate =
+        {
+            .oam = &sMonIconOamData,
+            .image = image,
+            .anims = anims,
+            .affineAnims = sMonIconAffineAnims,
+            .callback = callback,
+            .paletteTag = paletteTag,
+        };
+
+        spriteId = CreateMonIconSprite(&iconTemplate, x, y, subpriority);
+    }
+
+    if (allocatedTiles != NULL)
+        gSprites[spriteId].data[6] = TRUE;
 
     UpdateMonIconFrame(&gSprites[spriteId]);
 
@@ -1404,6 +1525,8 @@ void FreeMonIconPalette(u16 species)
     u8 palIndex;
     palIndex = gMonIconPaletteIndices[species];
     FreeSpritePaletteByTag(gMonIconPaletteTable[palIndex].tag);
+    FreeSpritePaletteByTag(POKE_ICON_FOLLOWER_PAL_TAG + species);
+    FreeSpritePaletteByTag(POKE_ICON_SHINY_PAL_TAG_BASE + species);
 }
 
 void SpriteCB_MonIcon(struct Sprite *sprite)
@@ -1488,8 +1611,6 @@ static void ShiftFrameUp(u8 *frameData, s32 shift)
     }
 }
 
-#define FOLLOWER_FRAME_SIZE 0x200
-
 const u8 *GetFollowerIconTiles(u16 species)
 {
     const struct ObjectEventGraphicsInfo *info;
@@ -1522,6 +1643,74 @@ const u8 *GetFollowerIconTiles(u16 species)
     }
 
     return gDecompressionBuffer;
+}
+
+// Decompress all 6 follower frames into gDecompressionBuffer with vertical
+// alignment applied to each frame.  Returns NULL if species has no follower.
+static const u8 *GetAllFollowerIconTiles(u16 species)
+{
+    const struct ObjectEventGraphicsInfo *info;
+    s32 followerCenter, iconCenter, shift;
+    s32 i;
+
+    if (species > NUM_SPECIES || species == SPECIES_NONE)
+        return NULL;
+
+    info = &gPokemonObjectGraphics[species];
+
+    if (info->images == NULL || info->width != 32 || info->height != 32)
+        return NULL;
+
+    if (info->compressed)
+        LZ77UnCompWram((const u32 *)info->images[0].data, gDecompressionBuffer);
+    else
+        CpuCopy32(info->images[0].data, gDecompressionBuffer, FOLLOWER_ALL_FRAMES_SIZE);
+
+    // Vertical alignment: shift all 6 frames to match standard icon center
+    followerCenter = CalcContentCenterY(gDecompressionBuffer);
+    iconCenter = CalcContentCenterY(gMonIconTable[species]);
+    shift = followerCenter - iconCenter;
+
+    if (shift > 0)
+    {
+        for (i = 0; i < FOLLOWER_NUM_FRAMES; i++)
+            ShiftFrameUp(gDecompressionBuffer + FOLLOWER_FRAME_SIZE * i, shift);
+    }
+
+    return gDecompressionBuffer;
+}
+
+// Load the normal (non-shiny) follower palette for a species as a sprite palette.
+// Uses the same palette source as the overworld follower system.
+static void LoadNormalFollowerIconPalette(u16 species)
+{
+    u16 tag = POKE_ICON_BASE_PAL_TAG + gMonIconPaletteIndices[species];
+    struct SpritePalette spritePal;
+    extern const void *const gFollowerPalettes[][2];
+    extern const u32 gFollowerPalettesSize;
+
+    // Use the species-specific normal palette from the battle sprite data
+    // (compressed), which matches what the overworld uses
+    spritePal.data = (const u16 *)gMonPaletteTable[species].data;
+    spritePal.tag = POKE_ICON_FOLLOWER_PAL_TAG + species;
+
+    // Check for follower palette override
+    if (species < gFollowerPalettesSize && gFollowerPalettes[species][0] != NULL)
+        spritePal.data = gFollowerPalettes[species][0];
+
+    FreeSpritePaletteByTag(spritePal.tag);
+
+    if (IsLZ77Data(spritePal.data, PLTT_SIZE_4BPP, PLTT_SIZE_4BPP * 4))
+    {
+        struct CompressedSpritePalette cpal;
+        cpal.data = (const u32 *)spritePal.data;
+        cpal.tag = spritePal.tag;
+        LoadCompressedSpritePalette(&cpal);
+    }
+    else
+    {
+        LoadSpritePalette(&spritePal);
+    }
 }
 
 void TryLoadAllMonIconPalettesAtOffset(u16 offset)
