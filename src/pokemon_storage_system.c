@@ -224,9 +224,9 @@ enum {
     PALTAG_MON_ICON_0 = 56000,
     PALTAG_MON_ICON_1, // Used implicitly in CreateMonIconSprite
     PALTAG_MON_ICON_2, // Used implicitly in CreateMonIconSprite
-    PALTAG_3, // Unused
-    PALTAG_4, // Unused
-    PALTAG_5, // Unused
+    PALTAG_MON_ICON_0_SHINY, // Shiny icon palette variants
+    PALTAG_MON_ICON_1_SHINY,
+    PALTAG_MON_ICON_2_SHINY,
     PALTAG_DISPLAY_MON,
     PALTAG_MISC_1,
     PALTAG_MARKING_COMBO,
@@ -657,7 +657,7 @@ static void ReshowReleaseMon(void);
 static bool8 ResetReleaseMonSpritePtr(void);
 static void SetMovingMonPriority(u8);
 static void SpriteCB_HeldMon(struct Sprite *);
-static struct Sprite *CreateMonIconSprite(u16, u32, s16, s16, u8, u8);
+static struct Sprite *CreateMonIconSprite(u16, u32, s16, s16, u8, u8, bool32);
 static void DestroyBoxMonIcon(struct Sprite *);
 
 // Pokémon data
@@ -4529,10 +4529,11 @@ static u8 GetMonIconPriorityByCursorPos(void)
 static void CreateMovingMonIcon(void)
 {
     u32 personality = GetMonData(&sStorage->movingMon, MON_DATA_PERSONALITY);
+    u32 otId = GetMonData(&sStorage->movingMon, MON_DATA_OT_ID);
     u16 species = GetMonData(&sStorage->movingMon, MON_DATA_SPECIES_OR_EGG);
     u8 priority = GetMonIconPriorityByCursorPos();
 
-    sStorage->movingMonSprite = CreateMonIconSprite(species, personality, 0, 0, priority, 7);
+    sStorage->movingMonSprite = CreateMonIconSprite(species, personality, 0, 0, priority, 7, IsShinyOtIdPersonality(otId, personality));
     sStorage->movingMonSprite->callback = SpriteCB_HeldMon;
 }
 
@@ -4554,8 +4555,10 @@ static void InitBoxMonSprites(u8 boxId)
             species = GetBoxMonDataAt(boxId, boxPosition, MON_DATA_SPECIES_OR_EGG);
             if (species != SPECIES_NONE)
             {
+                u32 otId;
                 personality = GetBoxMonDataAt(boxId, boxPosition, MON_DATA_PERSONALITY);
-                sStorage->boxMonsSprites[count] = CreateMonIconSprite(species, personality, 8 * (3 * j) + 100, 8 * (3 * i) + 44, 2, 19 - j);
+                otId = GetBoxMonDataAt(boxId, boxPosition, MON_DATA_OT_ID);
+                sStorage->boxMonsSprites[count] = CreateMonIconSprite(species, personality, 8 * (3 * j) + 100, 8 * (3 * i) + 44, 2, 19 - j, IsShinyOtIdPersonality(otId, personality));
                 // Locked nuzlocke mons should be transparent
                 if (GetBoxMonDataAt(boxId, boxPosition, MON_DATA_NUZLOCKE_RIBBON))
                     sStorage->boxMonsSprites[count]->oam.objMode = ST_OAM_OBJ_BLEND;
@@ -4589,8 +4592,9 @@ static void CreateBoxMonIconAtPos(u8 boxPosition)
         s16 x = 8 * (3 * (boxPosition % IN_BOX_COLUMNS)) + 100;
         s16 y = 8 * (3 * (boxPosition / IN_BOX_COLUMNS)) + 44;
         u32 personality = GetCurrentBoxMonData(boxPosition, MON_DATA_PERSONALITY);
+        u32 otId = GetCurrentBoxMonData(boxPosition, MON_DATA_OT_ID);
 
-        sStorage->boxMonsSprites[boxPosition] = CreateMonIconSprite(species, personality, x, y, 2, 19 - (boxPosition % IN_BOX_COLUMNS));
+        sStorage->boxMonsSprites[boxPosition] = CreateMonIconSprite(species, personality, x, y, 2, 19 - (boxPosition % IN_BOX_COLUMNS), IsShinyOtIdPersonality(otId, personality));
         if (sStorage->boxOption == OPTION_MOVE_ITEMS)
             sStorage->boxMonsSprites[boxPosition]->oam.objMode = ST_OAM_OBJ_BLEND;
         // Locked nuzlocke mons should be transparent
@@ -4690,9 +4694,11 @@ static u8 CreateBoxMonIconsInColumn(u8 column, u16 distance, s16 speed)
         {
             if (sStorage->boxSpecies[boxPosition] != SPECIES_NONE)
             {
+                u32 otId = GetBoxMonDataAt(sStorage->incomingBoxId, boxPosition, MON_DATA_OT_ID);
                 sStorage->boxMonsSprites[boxPosition] = CreateMonIconSprite(sStorage->boxSpecies[boxPosition],
                                                                                         sStorage->boxPersonalities[boxPosition],
-                                                                                        x, y, 2, subpriority);
+                                                                                        x, y, 2, subpriority,
+                                                                                        IsShinyOtIdPersonality(otId, sStorage->boxPersonalities[boxPosition]));
                 if (sStorage->boxMonsSprites[boxPosition] != NULL)
                 {
                     sStorage->boxMonsSprites[boxPosition]->sDistance = distance;
@@ -4717,9 +4723,11 @@ static u8 CreateBoxMonIconsInColumn(u8 column, u16 distance, s16 speed)
         {
             if (sStorage->boxSpecies[boxPosition] != SPECIES_NONE)
             {
+                u32 otId = GetBoxMonDataAt(sStorage->incomingBoxId, boxPosition, MON_DATA_OT_ID);
                 sStorage->boxMonsSprites[boxPosition] = CreateMonIconSprite(sStorage->boxSpecies[boxPosition],
                                                                                         sStorage->boxPersonalities[boxPosition],
-                                                                                        x, y, 2, subpriority);
+                                                                                        x, y, 2, subpriority,
+                                                                                        IsShinyOtIdPersonality(otId, sStorage->boxPersonalities[boxPosition]));
                 if (sStorage->boxMonsSprites[boxPosition] != NULL)
                 {
                     sStorage->boxMonsSprites[boxPosition]->sDistance = distance;
@@ -4853,7 +4861,7 @@ static void CreatePartyMonsSprites(bool8 visible)
     u16 species = GetMonData(&gPlayerParty[0], MON_DATA_SPECIES_OR_EGG);
     u32 personality = GetMonData(&gPlayerParty[0], MON_DATA_PERSONALITY);
 
-    sStorage->partySprites[0] = CreateMonIconSprite(species, personality, 104, 64, 1, 12);
+    sStorage->partySprites[0] = CreateMonIconSprite(species, personality, 104, 64, 1, 12, IsMonShiny(&gPlayerParty[0]));
     count = 1;
     for (i = 1; i < PARTY_SIZE; i++)
     {
@@ -4861,7 +4869,7 @@ static void CreatePartyMonsSprites(bool8 visible)
         if (species != SPECIES_NONE)
         {
             personality = GetMonData(&gPlayerParty[i], MON_DATA_PERSONALITY);
-            sStorage->partySprites[i] = CreateMonIconSprite(species, personality, 152,  8 * (3 * (i - 1)) + 16, 1, 12);
+            sStorage->partySprites[i] = CreateMonIconSprite(species, personality, 152,  8 * (3 * (i - 1)) + 16, 1, 12, IsMonShiny(&gPlayerParty[i]));
             count++;
         }
         else
@@ -5248,14 +5256,15 @@ static void RemoveSpeciesFromIconList(u16 species)
     }
 }
 
-static struct Sprite *CreateMonIconSprite(u16 species, u32 personality, s16 x, s16 y, u8 oamPriority, u8 subpriority)
+static struct Sprite *CreateMonIconSprite(u16 species, u32 personality, s16 x, s16 y, u8 oamPriority, u8 subpriority, bool32 isShiny)
 {
     u16 tileNum;
     u8 spriteId;
+    u8 palOffset = isShiny ? 3 : 0;
     struct SpriteTemplate template = sSpriteTemplate_MonIcon;
 
     species = GetIconSpecies(species, personality);
-    template.paletteTag = PALTAG_MON_ICON_0 + gMonIconPaletteIndices[species];
+    template.paletteTag = PALTAG_MON_ICON_0 + gMonIconPaletteIndices[species] + palOffset;
     tileNum = TryLoadMonIconTiles(species);
     if (tileNum == 0xFFFF)
         return NULL;

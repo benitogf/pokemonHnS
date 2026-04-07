@@ -1974,7 +1974,7 @@ static void UpdateTrainerCardMonIcons(void)
     for (i = 0; i < gPlayerPartyCount; i++, x += 32)
     {
         species = GetMonData(&gPlayerParty[i], MON_DATA_SPECIES);
-        spriteIdData[i] = CreateMonIcon(species, SpriteCB_MonIcon, x, 124, 1, GetMonData(&gPlayerParty[0], MON_DATA_PERSONALITY), TRUE);
+        spriteIdData[i] = CreateMonIcon(species, SpriteCB_MonIcon, x, 124, 1, GetMonData(&gPlayerParty[0], MON_DATA_PERSONALITY), TRUE, IsMonShiny(&gPlayerParty[i]));
         gSprites[spriteIdData[i]].oam.priority = 0;
         StartSpriteAnim(&gSprites[spriteIdData[i]], 4);
         spriteIdPalette[i] = gMonIconPaletteIndices[species];
