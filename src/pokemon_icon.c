@@ -1271,40 +1271,6 @@ void LoadMonIconPalette(u16 species)
         LoadSpritePalette(&gMonIconPaletteTable[palIndex]);
 }
 
-static bool32 SpeciesHasModernShiny(u16 species)
-{
-    switch (species)
-    {
-    case SPECIES_PIKACHU:
-    case SPECIES_RAICHU:
-    case SPECIES_PICHU:
-    case SPECIES_VAPOREON:
-    case SPECIES_JOLTEON:
-    case SPECIES_FLAREON:
-    case SPECIES_REGICE:
-    case SPECIES_HERACROSS:
-    case SPECIES_HAUNTER:
-    case SPECIES_GENGAR:
-    case SPECIES_SCYTHER:
-    case SPECIES_BLAZIKEN:
-    case SPECIES_XATU:
-    case SPECIES_PARAS:
-    case SPECIES_CHINCHOU:
-    case SPECIES_LANTURN:
-    case SPECIES_ZAPDOS:
-    case SPECIES_ELEKID:
-    case SPECIES_FARFETCHD:
-    case SPECIES_MAROWAK:
-    case SPECIES_PHANPY:
-    case SPECIES_LAPRAS:
-    case SPECIES_TENTACOOL:
-    case SPECIES_TENTACRUEL:
-        return TRUE;
-    default:
-        return FALSE;
-    }
-}
-
 u16 GetShinyMonIconPaletteTag(u16 species)
 {
     return POKE_ICON_SHINY_PAL_TAG_BASE + species;
@@ -1316,17 +1282,20 @@ void LoadShinyMonIconPalette(u16 species)
     const u16 *palData;
     struct SpritePalette pal;
 
-    // Already loaded
-    if (IndexOfSpritePaletteTag(tag) != 0xFF)
-        return;
-
     if (species > NUM_SPECIES)
         species = INVALID_ICON_SPECIES;
 
-    // Select precomputed shiny icon palette (standard or modern)
+    // Always free and reload to reflect current modern/standard setting.
+    // Without this, a previously cached standard palette would persist
+    // even after the player enables modern shinies.
+    FreeSpritePaletteByTag(tag);
+
+    // Select precomputed shiny icon palette.
+    // Use modern table if setting is active and species has a modern entry
+    // (non-zero first element means the table was populated for this species).
     if (gSaveBlock1Ptr != NULL
-     && SpeciesHasModernShiny(species)
-     && gSaveBlock1Ptr->tx_Features_ShinyColors == 1)
+     && gSaveBlock1Ptr->tx_Features_ShinyColors == 1
+     && sShinyModernIconPalettes[species][0] != 0)
         palData = sShinyModernIconPalettes[species];
     else
         palData = sShinyIconPalettes[species];

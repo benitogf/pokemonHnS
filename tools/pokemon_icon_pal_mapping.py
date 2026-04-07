@@ -1,20 +1,17 @@
 #!/usr/bin/env python3
-"""Generate precomputed shiny icon palettes via per-color HSV shifts.
+"""Generate precomputed shiny icon palettes via direct color substitution.
 
-For each Pokemon species, for each icon palette color:
-1. Find the nearest normal.pal battle sprite color
-2. Compute the HSV shift from that normal.pal color to the corresponding
-   shiny.pal color
-3. Apply that per-color shift to the icon color
+For each Pokemon species, for each icon palette color used by that
+species' icon, finds the nearest match in the species' normal battle
+sprite palette and substitutes the corresponding shiny palette color.
 
-This preserves icon visual quality while accurately reflecting each
-color's individual shiny transformation.
+This produces shiny icons that use the actual shiny palette colors,
+giving results like cyan Poliwhirl and white modern Gengar.
 
 Usage: python3 tools/pokemon_icon_pal_mapping.py
 Output: src/data/pokemon_graphics/icon_pal_mapping.h
 """
 
-import colorsys
 import os
 import re
 import sys
@@ -27,7 +24,7 @@ except ImportError:
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Species with modern shiny variants (must match SpeciesHasModernShiny in C)
+# Species with modern shiny variants (must match C code)
 MODERN_SHINY_SPECIES = [
     'SPECIES_PIKACHU', 'SPECIES_RAICHU', 'SPECIES_PICHU',
     'SPECIES_VAPOREON', 'SPECIES_JOLTEON', 'SPECIES_FLAREON',
@@ -41,7 +38,6 @@ MODERN_SHINY_SPECIES = [
 
 
 def read_jasc_pal(path):
-    """Read a JASC-PAL file, return list of (R,G,B) tuples (max 16)."""
     colors = []
     with open(path) as f:
         lines = f.readlines()
@@ -52,23 +48,7 @@ def read_jasc_pal(path):
     return colors[:16]
 
 
-def rgb_to_hsv(r, g, b):
-    """Convert 8-bit RGB to HSV (h=0-360, s=0-1, v=0-1)."""
-    h, s, v = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
-    return h * 360.0, s, v
-
-
-def hsv_to_rgb(h, s, v):
-    """Convert HSV to 8-bit RGB, clamped."""
-    h = h % 360.0
-    s = max(0.0, min(1.0, s))
-    v = max(0.0, min(1.0, v))
-    r, g, b = colorsys.hsv_to_rgb(h / 360.0, s, v)
-    return int(round(r * 255)), int(round(g * 255)), int(round(b * 255))
-
-
 def rgb_to_gba(r, g, b):
-    """Convert 8-bit RGB to 15-bit GBA color."""
     return ((r >> 3) & 0x1F) | (((g >> 3) & 0x1F) << 5) | (((b >> 3) & 0x1F) << 10)
 
 
@@ -82,9 +62,7 @@ def color_distance(c1, c2):
 
 
 def find_nearest(color, palette):
-    """Find index of nearest color in palette using perceptual distance."""
-    best_idx = 0
-    best_dist = 999999
+    best_idx, best_dist = 0, 999999
     for j in range(len(palette)):
         d = color_distance(color, palette[j])
         if d < best_dist:
@@ -93,82 +71,18 @@ def find_nearest(color, palette):
     return best_idx, best_dist
 
 
-def apply_per_color_shift(icon_color, normal_color, shiny_color):
-    """Compute HSV shift from normal->shiny and apply to icon_color.
-
-    This transforms the icon color by the same relative change that
-    the battle sprite color undergoes for the shiny variant.
-    """
-    nr, ng, nb = normal_color
-    sr, sg, sb = shiny_color
-    ir, ig, ib = icon_color
-
-    # If normal and shiny are identical, no change needed
-    if (nr, ng, nb) == (sr, sg, sb):
-        return icon_color
-
-    nh, ns, nv = rgb_to_hsv(nr, ng, nb)
-    sh, ss, sv = rgb_to_hsv(sr, sg, sb)
-    ih, is_, iv = rgb_to_hsv(ir, ig, ib)
-
-    # Hue: additive shift (handle wraparound)
-    dh = sh - nh
-    if dh > 180:
-        dh -= 360
-    elif dh < -180:
-        dh += 360
-
-    # Saturation and value: multiplicative ratio
-    if ns > 0.01:
-        s_ratio = ss / ns
-    else:
-        # Normal is grey, shiny has color: use absolute saturation
-        s_ratio = 1.0
-        is_ = ss  # Direct set
-
-    if nv > 0.01:
-        v_ratio = sv / nv
-    else:
-        v_ratio = 1.0
-
-    # Apply shift to icon color
-    new_h = (ih + dh) % 360.0
-    if ns > 0.01:
-        new_s = max(0.0, min(1.0, is_ * s_ratio))
-    else:
-        new_s = is_
-    new_v = max(0.0, min(1.0, iv * v_ratio))
-
-    # For very grey icon colors (low saturation), skip hue shift
-    # but still apply value change
-    if is_ < 0.05:
-        new_h = ih
-        new_s = max(0.0, min(1.0, is_ + (ss - ns)))  # Additive for near-zero
-
-    return hsv_to_rgb(new_h, new_s, new_v)
-
-
-def compute_shiny_icon_palette(icon_palette, normal_pal, shiny_pal, used_indices):
-    """Build a shiny icon palette using per-color HSV shifts."""
-    result = []
+def build_shiny_palette(icon_palette, normal_pal, shiny_pal, used_indices):
+    """Build a shiny icon palette by direct substitution from shiny.pal."""
+    result = list(icon_palette)  # Start with original
     for i in range(16):
         if i == 0 or i not in used_indices:
-            result.append(icon_palette[i])
             continue
-
-        # Find nearest normal.pal color for this icon color
         best_idx, _ = find_nearest(icon_palette[i], normal_pal)
-
-        # Apply the per-color shift
-        shifted = apply_per_color_shift(
-            icon_palette[i], normal_pal[best_idx], shiny_pal[best_idx]
-        )
-        result.append(shifted)
+        result[i] = shiny_pal[best_idx]
     return result
 
 
 def get_used_indices(icon_path):
-    """Read icon.png, return set of used palette indices."""
     img = Image.open(icon_path)
     if img.mode != 'P':
         return set()
@@ -236,12 +150,8 @@ def main():
     icon_pal_dir = os.path.join(PROJECT_ROOT, 'graphics/pokemon/icon_palettes')
     output_path = os.path.join(PROJECT_ROOT, 'src/data/pokemon_graphics/icon_pal_mapping.h')
 
-    # Read shared icon palettes
-    icon_pals = []
-    for i in range(3):
-        icon_pals.append(read_jasc_pal(os.path.join(icon_pal_dir, f'icon_palette_{i}.pal')))
+    icon_pals = [read_jasc_pal(os.path.join(icon_pal_dir, f'icon_palette_{i}.pal')) for i in range(3)]
 
-    # Parse source data
     species_ids = parse_species_ids(species_h)
     icon_paths = parse_icon_paths(pokemon_h)
     icon_table = parse_icon_table(pokemon_icon_c)
@@ -282,58 +192,52 @@ def main():
         shiny_pal = read_jasc_pal(shiny_pal_path)
         used_indices = get_used_indices(icon_path)
 
-        result = compute_shiny_icon_palette(icon_palette, normal_pal, shiny_pal, used_indices)
+        result = build_shiny_palette(icon_palette, normal_pal, shiny_pal, used_indices)
         std_palettes[sp_name] = [rgb_to_gba(*c) for c in result]
         stats['processed'] += 1
 
-        # Modern shiny variant
         if sp_name in MODERN_SHINY_SPECIES:
-            mod_shiny_path = os.path.join(gfx_dir, 'shiny_modern.pal')
-            if os.path.exists(mod_shiny_path):
-                mod_shiny_pal = read_jasc_pal(mod_shiny_path)
-                mod_result = compute_shiny_icon_palette(
-                    icon_palette, normal_pal, mod_shiny_pal, used_indices
-                )
+            mod_path = os.path.join(gfx_dir, 'shiny_modern.pal')
+            if os.path.exists(mod_path):
+                mod_pal = read_jasc_pal(mod_path)
+                mod_result = build_shiny_palette(icon_palette, normal_pal, mod_pal, used_indices)
                 mod_palettes[sp_name] = [rgb_to_gba(*c) for c in mod_result]
                 stats['modern'] += 1
 
     print(f"Processed {stats['processed']} species, {stats['modern']} modern variants")
 
     # Show samples
-    for sample in ['SPECIES_GENGAR', 'SPECIES_SANDSLASH', 'SPECIES_POLIWHIRL', 'SPECIES_PIKACHU']:
+    for sample in ['SPECIES_GENGAR', 'SPECIES_SANDSLASH', 'SPECIES_POLIWHIRL']:
         if sample not in species_dirs or sample not in pal_indices:
             continue
         gfx_dir = os.path.join(PROJECT_ROOT, species_dirs[sample])
-        icon_path = os.path.join(gfx_dir, 'icon.png')
         normal_pal = read_jasc_pal(os.path.join(gfx_dir, 'normal.pal'))
         shiny_pal = read_jasc_pal(os.path.join(gfx_dir, 'shiny.pal'))
         pal_idx = pal_indices[sample]
         icon_pal = icon_pals[pal_idx]
-        used = get_used_indices(icon_path)
+        used = get_used_indices(os.path.join(gfx_dir, 'icon.png'))
 
         print(f"\n  {sample} (pal {pal_idx}):")
         for i in sorted(used):
             if i == 0:
                 continue
             best_idx, best_dist = find_nearest(icon_pal[i], normal_pal)
-            shifted = apply_per_color_shift(icon_pal[i], normal_pal[best_idx], shiny_pal[best_idx])
-            print(f"    [{i:2d}] icon{icon_pal[i]} -> normal[{best_idx}]{normal_pal[best_idx]} -> shiny[{best_idx}]{shiny_pal[best_idx]} => {shifted}")
+            print(f"    [{i:2d}] {icon_pal[i]} -> shiny[{best_idx}]{shiny_pal[best_idx]}")
 
         if sample in mod_palettes:
-            mod_shiny_pal = read_jasc_pal(os.path.join(gfx_dir, 'shiny_modern.pal'))
+            mod_pal = read_jasc_pal(os.path.join(gfx_dir, 'shiny_modern.pal'))
             print(f"    Modern:")
             for i in sorted(used):
                 if i == 0:
                     continue
                 best_idx, _ = find_nearest(icon_pal[i], normal_pal)
-                shifted = apply_per_color_shift(icon_pal[i], normal_pal[best_idx], mod_shiny_pal[best_idx])
-                print(f"    [{i:2d}] icon{icon_pal[i]} -> normal[{best_idx}] -> modern[{best_idx}]{mod_shiny_pal[best_idx]} => {shifted}")
+                print(f"    [{i:2d}] {icon_pal[i]} -> modern[{best_idx}]{mod_pal[best_idx]}")
 
     # Write C header
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, 'w') as f:
         f.write("// Auto-generated by tools/pokemon_icon_pal_mapping.py\n")
-        f.write("// Precomputed shiny icon palettes using per-color HSV shifts.\n")
+        f.write("// Precomputed shiny icon palettes via direct color substitution.\n")
         f.write("// Regenerate with: python3 tools/pokemon_icon_pal_mapping.py\n\n")
 
         f.write("static const u16 sShinyIconPalettes[NUM_SPECIES + 1][16] =\n{\n")
