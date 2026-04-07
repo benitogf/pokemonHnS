@@ -4145,6 +4145,9 @@ static void AnimateSelectedPartyIcon(u8 spriteId, u8 animNum)
     gSprites[spriteId].data[0] = 0;
     if (animNum == 0)
     {
+        // Deselected: reset to frame 0, static (no animation)
+        gSprites[spriteId].animCmdIndex = 0;
+        gSprites[spriteId].animDelayCounter = 0;
         if (gSprites[spriteId].x == 16)
         {
             gSprites[spriteId].x2 = 0;
@@ -4156,9 +4159,14 @@ static void AnimateSelectedPartyIcon(u8 spriteId, u8 animNum)
             gSprites[spriteId].y2 = 0;
         }
         gSprites[spriteId].callback = SpriteCB_UpdatePartyMonIcon;
+        // Show frame 0 immediately
+        UpdateMonIconFrame(&gSprites[spriteId]);
     }
     else
     {
+        // Selected: play rotation animation
+        gSprites[spriteId].animCmdIndex = 0;
+        gSprites[spriteId].animDelayCounter = 0;
         gSprites[spriteId].x2 = 0;
         gSprites[spriteId].y2 = 0;
         gSprites[spriteId].callback = SpriteCB_BouncePartyMonIcon;
@@ -4167,20 +4175,12 @@ static void AnimateSelectedPartyIcon(u8 spriteId, u8 animNum)
 
 static void SpriteCB_BouncePartyMonIcon(struct Sprite *sprite)
 {
-    u8 animCmd = UpdateMonIconFrame(sprite);
-
-    if (animCmd != 0)
-    {
-        if (animCmd & 1) // % 2 also matches
-            sprite->y2 = -3;
-        else
-            sprite->y2 = 1;
-    }
+    UpdateMonIconFrame(sprite);
 }
 
 static void SpriteCB_UpdatePartyMonIcon(struct Sprite *sprite)
 {
-    UpdateMonIconFrame(sprite);
+    // Deselected: static, no frame updates
 }
 
 static void CreatePartyMonHeldItemSprite(struct Pokemon *mon, struct PartyMenuBox *menuBox)
