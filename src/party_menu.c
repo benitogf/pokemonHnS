@@ -4145,7 +4145,8 @@ static void AnimateSelectedPartyIcon(u8 spriteId, u8 animNum)
     gSprites[spriteId].data[0] = 0;
     if (animNum == 0)
     {
-        // Deselected: reset to frame 0, static (no animation)
+        // Deselected: slow walk forward (anim 4 = frames 0-1 slow)
+        gSprites[spriteId].animNum = 4;
         gSprites[spriteId].animCmdIndex = 0;
         gSprites[spriteId].animDelayCounter = 0;
         if (gSprites[spriteId].x == 16)
@@ -4159,12 +4160,11 @@ static void AnimateSelectedPartyIcon(u8 spriteId, u8 animNum)
             gSprites[spriteId].y2 = 0;
         }
         gSprites[spriteId].callback = SpriteCB_UpdatePartyMonIcon;
-        // Show frame 0 immediately
-        UpdateMonIconFrame(&gSprites[spriteId]);
     }
     else
     {
-        // Selected: play rotation animation
+        // Selected: full rotation animation (anim 0 = all 6 frames)
+        gSprites[spriteId].animNum = 0;
         gSprites[spriteId].animCmdIndex = 0;
         gSprites[spriteId].animDelayCounter = 0;
         gSprites[spriteId].x2 = 0;
@@ -4180,7 +4180,7 @@ static void SpriteCB_BouncePartyMonIcon(struct Sprite *sprite)
 
 static void SpriteCB_UpdatePartyMonIcon(struct Sprite *sprite)
 {
-    // Deselected: static, no frame updates
+    UpdateMonIconFrame(sprite);
 }
 
 static void CreatePartyMonHeldItemSprite(struct Pokemon *mon, struct PartyMenuBox *menuBox)

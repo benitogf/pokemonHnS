@@ -1140,8 +1140,8 @@ static const union AnimCmd sFollowerAnim_3[] =
 
 static const union AnimCmd sFollowerAnim_4[] =
 {
-    ANIMCMD_FRAME(0, 29),
-    ANIMCMD_FRAME(0, 29),
+    ANIMCMD_FRAME(0, 30),
+    ANIMCMD_FRAME(1, 30),
     ANIMCMD_JUMP(0),
 };
 
