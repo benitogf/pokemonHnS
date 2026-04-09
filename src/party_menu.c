@@ -581,6 +581,7 @@ static bool8 ShowPartyMenu(void)
         gMain.state++;
         break;
     case 3:
+        FreeAllMonIconTileAllocations();
         ResetSpriteData();
         gMain.state++;
         break;
@@ -1244,6 +1245,7 @@ static void Task_ClosePartyMenuAndSetCB2(u8 taskId)
         else
             SetMainCallback2(gPartyMenu.exitCallback);
 
+        FreeAllMonIconTileAllocations();
         ResetSpriteData();
         FreePartyPointers();
         DestroyTask(taskId);

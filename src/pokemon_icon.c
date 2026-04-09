@@ -1434,6 +1434,19 @@ void FreeMonIconPalettes(void)
         FreeSpritePaletteByTag(gMonIconPaletteTable[i].tag);
 }
 
+void FreeAllMonIconTileAllocations(void)
+{
+    u8 i;
+    for (i = 0; i < MAX_SPRITES; i++)
+    {
+        if (gSprites[i].inUse && gSprites[i].data[6])
+        {
+            Free((void *)gSprites[i].images);
+            gSprites[i].data[6] = FALSE;
+        }
+    }
+}
+
 static bool32 SpeciesHasModernShiny(u16 species)
 {
     switch (species)

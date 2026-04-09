@@ -23,6 +23,7 @@ void FreeMonIconPalettes(void);
 u8 CreateMonIconNoPersonality(u16 species, void (*callback)(struct Sprite *), s16 x, s16 y, u8 subpriority, bool32 handleDeoxys);
 void FreeMonIconPalette(u16 species);
 void FreeAndDestroyMonIconSprite(struct Sprite *sprite);
+void FreeAllMonIconTileAllocations(void);
 void LoadShinyMonIconPalette(u16 species);
 void FreeShinyMonIconPalette(u16 species);
 const u8 *GetFollowerIconTiles(u16 species);
