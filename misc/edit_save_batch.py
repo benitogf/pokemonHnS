@@ -305,8 +305,8 @@ EDITS = [
     (('party',), 'scyther', {'shiny': True, 'item': 'big_nugget'}),
     # 16. annihilape party: jolly, big nugget (NOT shiny)
     (('party',), 'annihilape', {'nature': 'jolly', 'item': 'big_nugget'}),
-    # 17. golbat party: jolly, big nugget (NOT shiny)
-    (('party',), 'golbat', {'nature': 'jolly', 'item': 'big_nugget'}),
+    # 17. golbat party: jolly, shiny, big nugget
+    (('party',), 'golbat', {'shiny': True, 'nature': 'jolly', 'item': 'big_nugget'}),
     # 18. skarmory party: impish, shiny, big nugget
     (('party',), 'skarmory', {'shiny': True, 'nature': 'impish', 'item': 'big_nugget'}),
     # 19. mareep box 1: shiny, timid, water stone

@@ -1108,7 +1108,8 @@ struct SaveBlock1
     /*0x3B58*/ LilycoveLady lilycoveLady;
     /*0x3B98*/ struct TrainerNameRecord trainerNameRecords[20];
     /*0x3C88*/ u8 registeredTexts[UNION_ROOM_KB_ROW_COUNT][21];
-    /*0x3D5A*/ u8 unused_3D5A[10];
+    /*0x3D5A*/ u8 designatedFollower; // Party slot (0-5) of designated follower, or 0xFF for default (first live mon)
+    /*0x3D5B*/ u8 unused_3D5B[9];
     /*0x3D64*/ struct TrainerHillSave trainerHill;
     /*0x3D70*/ struct WaldaPhrase waldaPhrase;
     /*0x3D88*/ u8 unused_NuzlockeEncounterFlags[9]; //Old nuzlocke encounter list that became to small. Should be [12] since HnS adds new encounter zones
